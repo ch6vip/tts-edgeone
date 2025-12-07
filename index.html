@@ -347,6 +347,57 @@
       transform: scale(0.97);
     }
 
+    /* 新增样式开始 */
+    .btn-import {
+      background: linear-gradient(135deg, #8b5cf6, #d946ef);
+      color: white;
+      padding: 0.8rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      text-decoration: none;
+    }
+
+    .btn-import:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(217, 70, 239, 0.3);
+    }
+
+    .btn-import:active {
+      transform: scale(0.97);
+    }
+
+    .btn-copy {
+      background: linear-gradient(135deg, #6366f1, #818cf8);
+      color: white;
+      padding: 0.8rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn-copy:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(99, 102, 241, 0.3);
+    }
+
+    .btn-copy:active {
+      transform: scale(0.97);
+    }
+    /* 新增样式结束 */
+
     details {
       border: 1px solid var(--border-color);
       border-radius: 8px;
@@ -641,7 +692,15 @@
       <!-- 下载按钮 -->
       <div v-if="showDownloadBtn" class="download-section" v-cloak>
         <button class="btn-download" @click="downloadAudio">
-          <span>📥</span> 下载音频文件
+          <span>📥</span> 下载音频
+        </button>
+        
+        <button class="btn-import" @click="importToLegado" style="margin-left: 10px;">
+          <span>📖</span> 一键导入
+        </button>
+
+        <button class="btn-copy" @click="copyLegadoJson" style="margin-left: 10px;">
+          <span>📋</span> 复制配置
         </button>
       </div>
     </main>
@@ -750,6 +809,72 @@
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+          }
+        },
+
+        // 新增方法 1: 一键导入到阅读 APP
+        importToLegado() {
+          const baseUrl = this.config.baseUrl.trim();
+          const apiKey = this.config.apiKey.trim();
+          const voice = this.form.voice;
+          // 自动生成简短名称，如 EdgeOne-Xiaoxiao
+          const shortName = voice.split('-')[2]?.replace('Neural', '') || voice;
+          const name = `EdgeOne-${shortName}`;
+
+          if (!baseUrl) {
+            this.updateStatus('请先填写 API Base URL', 'error');
+            return;
+          }
+
+          // 1. 构建 reader 接口地址 (注意包含了 key 参数)
+          const readerApiUrl = `${baseUrl}/reader?voice=${voice}&n=${name}&key=${apiKey}`;
+
+          // 2. 构建阅读 APP 的导入协议链接
+          const legadoDeepLink = `legado://import/http_tts?src=${encodeURIComponent(readerApiUrl)}`;
+
+          // 3. 尝试唤起 APP
+          this.updateStatus('正在唤起阅读APP...', 'info');
+          window.location.href = legadoDeepLink;
+
+          setTimeout(() => {
+             this.updateStatus('已发送唤起请求。如未跳转，请尝试使用“复制配置”功能。', 'success');
+          }, 2000);
+        },
+
+        // 新增方法 2: 复制 JSON 配置 (无需后端 reader 接口)
+        async copyLegadoJson() {
+          const baseUrl = this.config.baseUrl.trim();
+          const apiKey = this.config.apiKey.trim();
+          const voice = this.form.voice;
+          const shortName = voice.split('-')[2]?.replace('Neural', '') || voice;
+          const sourceName = `EdgeOne-${shortName}`;
+
+          if (!baseUrl) {
+            this.updateStatus('请先填写 API Base URL', 'error');
+            return;
+          }
+
+          // 构建阅读 APP 的源配置对象
+          // 重点：URL 中必须包含 &key=${apiKey} 以通过 EdgeOne 验证
+          const legacyConfig = {
+            "concurrentRate": "0",
+            "contentType": "audio/mpeg",
+            "header": JSON.stringify({ "Authorization": `Bearer ${apiKey}` }),
+            "id": Date.now(),
+            "loginUrl": "",
+            "name": sourceName,
+            "url": `${baseUrl}/api/v1/audio/speech?t={{java.encodeURI(speakText)}}&v=${voice}&r={{(speakSpeed - 10) / 10 + 1}}&p=1.0&key=${apiKey}`
+          };
+
+          // 封装成数组
+          const jsonString = JSON.stringify([legacyConfig], null, 2);
+
+          try {
+            await navigator.clipboard.writeText(jsonString);
+            this.updateStatus('✅ 配置已复制！请打开“阅读”APP -> 设置 -> TTS引擎 -> 右上角菜单 -> 剪贴板导入', 'success');
+          } catch (err) {
+            console.error('复制失败:', err);
+            this.updateStatus('❌ 复制失败，请手动复制控制台中的 JSON', 'error');
           }
         },
         updateStatus(message, type = 'info') {
