@@ -86,15 +86,35 @@ function handleOptions(request) {
  * @returns {Promise<Response>} 语音数据响应
  */
 async function handleSpeechRequest(request) {
-  if (request.method !== "POST") {
+  // 1. 修改：允许 GET 和 POST
+  if (request.method !== "POST" && request.method !== "GET") {
     return errorResponse("不允许的方法", 405, "method_not_allowed");
   }
 
-  let requestBody;
-  try {
-    requestBody = await request.json();
-  } catch (err) {
-    return errorResponse(`JSON 解析错误: ${err.message}`, 400, "invalid_request_error");
+  let requestBody = {};
+
+  // 2. 新增：处理 GET 请求参数
+  if (request.method === "GET") {
+    const url = new URL(request.url);
+    const params = url.searchParams;
+    
+    requestBody = {
+      input: params.get("input") || params.get("t"), // 兼容 t 参数
+      voice: params.get("voice") || params.get("v"), // 兼容 v 参数
+      model: params.get("model") || "tts-1",
+      speed: parseFloat(params.get("speed") || params.get("r") || "1.0"),
+      pitch: parseFloat(params.get("pitch") || params.get("p") || "1.0"),
+      style: params.get("style") || params.get("s") || "general",
+      // GET 请求默认不使用流式，除非显式指定
+      stream: params.get("stream") === "true",
+    };
+  } else {
+    // 原有的 POST 处理逻辑
+    try {
+      requestBody = await request.json();
+    } catch (err) {
+      return errorResponse(`JSON 解析错误: ${err.message}`, 400, "invalid_request_error");
+    }
   }
 
   if (!requestBody.input) {
