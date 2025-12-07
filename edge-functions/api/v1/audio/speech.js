@@ -394,11 +394,6 @@ async function getEndpoint() {
 
     return data;
   } catch (error) {
-    // 如果有缓存的 Token，使用过期的 Token 作为备用
-    if (tokenInfo.token) {
-      return tokenInfo.endpoint;
-    }
-
     throw new Error(`端点获取失败: ${error.message}`);
   }
 }
