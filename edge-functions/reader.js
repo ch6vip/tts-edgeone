@@ -10,7 +10,8 @@ export default async function onRequest(context) {
 
   // 构建阅读 APP 需要的 URL
   // 注意：这里使用了阅读 APP 特有的占位符
-  const ttsUrl = `${baseUrl}/api/v1/audio/speech?t={{java.encodeURI(speakText)}}&v=${defaultVoice}&r={{(speakSpeed - 10) / 10 + 1}}&p=1.0`;
+// 修改点：在 URL 末尾添加了 &key=${apiKey}
+  const ttsUrl = `${baseUrl}/api/v1/audio/speech?t={{java.encodeURI(speakText)}}&v=${defaultVoice}&r={{(speakSpeed - 10) / 10 + 1}}&p=1.0&key=${apiKey}`;
 
   // 构建响应 JSON
   const config = {

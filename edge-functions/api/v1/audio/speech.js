@@ -52,8 +52,21 @@ export default async function onRequest(context) {
   // API 密钥验证
   const API_KEY = context.env.API_KEY;
   if (API_KEY) {
+    const url = new URL(request.url);
+    // 1. 尝试从 Header 获取
     const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.slice(7) !== API_KEY) {
+    let providedKey = null;
+    
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      providedKey = authHeader.slice(7);
+    }
+    // 2. 如果 Header 没有，尝试从 URL 参数获取 (支持 key 或 api_key)
+    else {
+      providedKey = url.searchParams.get("key") || url.searchParams.get("api_key");
+    }
+
+    // 3. 验证密钥
+    if (!providedKey || providedKey !== API_KEY) {
       return errorResponse("无效的 API 密钥", 401, "invalid_api_key");
     }
   }
