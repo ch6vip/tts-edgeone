@@ -4,21 +4,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>🎙️ TTS 服务终极测试页面 (v3.0 - EdgeOne Pages版)</title>
+  <title>CHANEL</title>
   <style>
     :root {
-      --primary-color: #4f46e5;
-      --success-color: #22c55e;
-      --error-color: #ef4444;
-      --warning-color: #f59e0b;
-      --light-gray: #f8fafc;
-      --gray: #64748b;
-      --border-color: #e2e8f0;
-      --text-color: #1e293b;
-      --mint-start: #f0fdfa;
-      --mint-middle: #e6fffa;
-      --mint-end: #fdf2f8;
-      --mint-accent: #6ee7b7;
+      --primary-color: #000000;
+      --success-color: #555555;
+      --error-color: #D3D3D3;
+      --warning-color: #AAAAAA;
+      --light-gray: #F5F5F5;
+      --gray: #808080;
+      --border-color: #DDDDDD;
+      --text-color: #000000;
     }
 
     * {
@@ -31,9 +27,8 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        "Helvetica Neue", Arial, sans-serif;
-      background: linear-gradient(135deg, var(--mint-start) 0%, var(--mint-middle) 50%, var(--mint-end) 100%);
+      font-family: "Times New Roman", Times, serif;
+      background: var(--light-gray);
       min-height: 100vh;
       color: var(--text-color);
       line-height: 1.6;
@@ -56,24 +51,21 @@
     .container {
       max-width: 800px;
       width: 100%;
-      background-color: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(10px);
+      background-color: #FFFFFF;
       padding: 2rem;
-      border-radius: 16px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 0;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.05);
+      border: 1px solid #000000;
     }
 
     h1 {
       text-align: center;
-      color: var(--text-color);
+      color: #000000;
       margin-bottom: 2rem;
-      font-weight: 700;
-      font-size: 1.8rem;
-      background: linear-gradient(135deg, var(--primary-color), var(--mint-accent));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      font-weight: bold;
+      font-size: 2rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
     }
 
     .form-group {
@@ -93,8 +85,8 @@
     textarea {
       width: 100%;
       padding: 0.8rem 1rem;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
+      border: 1px solid #000000;
+      border-radius: 0;
       font-size: 1rem;
       background-color: white;
       transition: border-color 0.2s, box-shadow 0.2s;
@@ -105,8 +97,8 @@
     select:focus,
     textarea:focus {
       outline: none;
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
+      border-color: #000000;
+      box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
     }
 
     textarea {
@@ -124,17 +116,18 @@
     }
 
     .clear-btn {
-      background: none;
-      border: none;
-      color: var(--primary-color);
+      background: #FFFFFF;
+      border: 1px solid #000000;
+      color: #000000;
       cursor: pointer;
       padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      transition: background-color 0.2s;
+      border-radius: 0;
+      transition: background-color 0.2s, color 0.2s;
     }
 
     .clear-btn:hover {
-      background-color: rgba(79, 70, 229, 0.1);
+      background-color: #000000;
+      color: #FFFFFF;
     }
 
     .label-with-controls {
@@ -166,11 +159,11 @@
     }
 
     .btn-insert-pause {
-      background: linear-gradient(135deg, var(--mint-accent), #10b981);
-      color: white;
+      background: #000000;
+      color: #FFFFFF;
       padding: 0.4rem 0.8rem;
-      border: none;
-      border-radius: 6px;
+      border: 1px solid #000000;
+      border-radius: 0;
       font-size: 0.85rem;
       font-weight: 500;
       cursor: pointer;
@@ -179,8 +172,7 @@
     }
 
     .btn-insert-pause:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+      opacity: 0.8;
     }
 
     .btn-insert-pause:active {
@@ -203,7 +195,7 @@
       flex-grow: 1;
       height: 6px;
       border-radius: 3px;
-      background: var(--border-color);
+      background: #EEEEEE;
       outline: none;
       -webkit-appearance: none;
       appearance: none;
@@ -215,7 +207,7 @@
       width: 20px;
       height: 20px;
       border-radius: 50%;
-      background: var(--primary-color);
+      background: #000000;
       cursor: pointer;
     }
 
@@ -223,7 +215,7 @@
       width: 20px;
       height: 20px;
       border-radius: 50%;
-      background: var(--primary-color);
+      background: #000000;
       cursor: pointer;
       border: none;
     }
@@ -232,7 +224,7 @@
       font-weight: 500;
       min-width: 50px;
       text-align: right;
-      color: var(--primary-color);
+      color: #000000;
       font-size: 0.9rem;
     }
 
@@ -245,8 +237,8 @@
 
     button {
       padding: 0.9rem 1rem;
-      border: none;
-      border-radius: 8px;
+      border: 1px solid #000000;
+      border-radius: 0;
       font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
@@ -260,18 +252,27 @@
     }
 
     .btn-generate {
-      background: linear-gradient(135deg, var(--gray), #475569);
-      color: white;
+      background: #000000;
+      color: #FFFFFF;
+      border: 1px solid #000000;
     }
 
     .btn-stream {
-      background: linear-gradient(135deg, var(--success-color), #16a34a);
-      color: white;
+      background: #FFFFFF;
+      color: #000000;
+      border: 1px solid #000000;
     }
 
     button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+      opacity: 0.85;
+    }
+
+    .btn-generate:hover {
+      background: #333333;
+    }
+
+    .btn-stream:hover {
+      background: #f0f0f0;
     }
 
     button:disabled {
@@ -324,11 +325,11 @@
     }
 
     .btn-download {
-      background: linear-gradient(135deg, var(--warning-color), #d97706);
+      background: #000000;
       color: white;
       padding: 0.8rem 1.5rem;
-      border: none;
-      border-radius: 8px;
+      border: 1px solid #000000;
+      border-radius: 0;
       font-size: 0.9rem;
       font-weight: 600;
       cursor: pointer;
@@ -339,8 +340,7 @@
     }
 
     .btn-download:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 12px rgba(245, 158, 11, 0.3);
+      opacity: 0.8;
     }
 
     .btn-download:active {
@@ -349,11 +349,11 @@
 
     /* 新增样式开始 */
     .btn-import {
-      background: linear-gradient(135deg, #8b5cf6, #d946ef);
-      color: white;
+      background: #FFFFFF;
+      color: #000000;
       padding: 0.8rem 1.5rem;
-      border: none;
-      border-radius: 8px;
+      border: 1px solid #000000;
+      border-radius: 0;
       font-size: 0.9rem;
       font-weight: 600;
       cursor: pointer;
@@ -365,8 +365,7 @@
     }
 
     .btn-import:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 12px rgba(217, 70, 239, 0.3);
+      opacity: 0.8;
     }
 
     .btn-import:active {
@@ -374,11 +373,11 @@
     }
 
     .btn-copy {
-      background: linear-gradient(135deg, #6366f1, #818cf8);
-      color: white;
+      background: #FFFFFF;
+      color: #000000;
       padding: 0.8rem 1.5rem;
-      border: none;
-      border-radius: 8px;
+      border: 1px solid #000000;
+      border-radius: 0;
       font-size: 0.9rem;
       font-weight: 600;
       cursor: pointer;
@@ -389,8 +388,7 @@
     }
 
     .btn-copy:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 12px rgba(99, 102, 241, 0.3);
+      opacity: 0.8;
     }
 
     .btn-copy:active {
@@ -399,11 +397,11 @@
     /* 新增样式结束 */
 
     details {
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
+      border: 1px solid #000000;
+      border-radius: 0;
       padding: 1rem;
       margin-bottom: 1.5rem;
-      background-color: rgba(248, 250, 252, 0.8);
+      background-color: #FFFFFF;
     }
 
     summary {
@@ -414,7 +412,7 @@
     }
 
     summary:hover {
-      color: var(--primary-color);
+      color: #555555;
     }
 
     .checkbox-grid {
@@ -715,7 +713,7 @@
     createApp({
       data() {
         return {
-          title: 'TTS 服务终极测试页面 (v3.0 - EdgeOne Pages版)',
+          title: 'CHANEL',
           isLoading: false,
           isStreaming: false,
           audioSrc: '',
