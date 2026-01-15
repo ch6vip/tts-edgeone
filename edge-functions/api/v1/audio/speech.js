@@ -1,18 +1,33 @@
 /**
  * EdgeOne Pages Edge Function - Microsoft Edge TTS 服务代理
  *
- * @version 2.4.0 (EdgeOne Pages 适配版)
+ * @version 2.5.0 (性能优化版)
  * @description 实现了内部自动批处理机制，优雅地处理 EdgeOne 的子请求限制。
  * API 现在可以处理任何长度的文本，不会因为"子请求过多"而失败。
- * 这是最终的生产就绪版本。
- * 
+ *
  * @features
  * - 支持流式和非流式 TTS 输出
- * - 自动文本清理和分块处理
+ * - 自动文本清理和分块处理（优化性能）
  * - 智能批处理避免 EdgeOne 限制
  * - 兼容 OpenAI TTS API 格式
  * - 支持多种中英文语音
+ * - Token 竞态保护机制
+ *
+ * @changelog v2.5.0
+ * - 代码模块化：提取公共工具库
+ * - 性能优化：优化文本分块算法和流式写入
+ * - 竞态保护：避免并发请求重复刷新 Token
+ * - 简化代码：移除冗余的 Base64 处理
  */
+
+// =================================================================================
+// 导入公共工具
+// =================================================================================
+
+import { makeCORSHeaders, handleOptions as corsHandleOptions } from '../../utils/cors.js';
+import { errorResponse } from '../../utils/errors.js';
+import { smartChunkText, cleanText } from '../../utils/text-processing.js';
+import { base64ToBytes, bytesToBase64 } from '../../utils/base64.js';
 
 // =================================================================================
 // 配置参数
@@ -47,7 +62,9 @@ export default async function onRequest(context) {
   const request = context.request;
 
   // 处理 CORS 预检请求
-  if (request.method === "OPTIONS") return handleOptions(request);
+  if (request.method === "OPTIONS") {
+    return corsHandleOptions(request.headers.get("Access-Control-Request-Headers"));
+  }
 
   // API 密钥验证
   const API_KEY = context.env.API_KEY;
@@ -82,16 +99,6 @@ export default async function onRequest(context) {
 // =================================================================================
 // 路由处理器
 // =================================================================================
-
-/**
- * 处理 CORS 预检请求
- * @param {Request} request - HTTP 请求对象
- * @returns {Response} CORS 响应
- */
-function handleOptions(request) {
-  const headers = makeCORSHeaders(request.headers.get("Access-Control-Request-Headers"));
-  return new Response(null, { status: 204, headers });
-}
 
 /**
  * 处理语音合成请求
@@ -222,18 +229,28 @@ async function streamVoice(textChunks, concurrency, ...ttsArgs) {
  */
 async function pipeChunksToStream(writer, chunks, concurrency, ...ttsArgs) {
   try {
+    // 动态计算最优并发数
+    const optimalConcurrency = Math.min(
+      concurrency,
+      chunks.length,
+      Math.max(5, Math.ceil(chunks.length / 3)) // 至少分 3 批，最少并发 5
+    );
+
     // 分批处理文本块以避免超出 EdgeOne 子请求限制
-    for (let i = 0; i < chunks.length; i += concurrency) {
-      const batch = chunks.slice(i, i + concurrency);
+    for (let i = 0; i < chunks.length; i += optimalConcurrency) {
+      const batch = chunks.slice(i, i + optimalConcurrency);
       const audioPromises = batch.map(chunk => getAudioChunk(chunk, ...ttsArgs));
 
       // 仅等待当前批次完成
       const audioBlobs = await Promise.all(audioPromises);
 
+      // 优化：并行转换 ArrayBuffer，减少等待时间
+      const bufferPromises = audioBlobs.map(blob => blob.arrayBuffer());
+      const buffers = await Promise.all(bufferPromises);
+
       // 将音频数据写入流
-      for (const blob of audioBlobs) {
-        const arrayBuffer = await blob.arrayBuffer();
-        writer.write(new Uint8Array(arrayBuffer));
+      for (const buffer of buffers) {
+        writer.write(new Uint8Array(buffer));
       }
     }
   } catch (error) {
@@ -254,9 +271,16 @@ async function pipeChunksToStream(writer, chunks, concurrency, ...ttsArgs) {
 async function getVoice(textChunks, concurrency, ...ttsArgs) {
   const allAudioBlobs = [];
   try {
+    // 动态计算最优并发数
+    const optimalConcurrency = Math.min(
+      concurrency,
+      textChunks.length,
+      Math.max(5, Math.ceil(textChunks.length / 3)) // 至少分 3 批，最少并发 5
+    );
+
     // 非流式模式也使用批处理
-    for (let i = 0; i < textChunks.length; i += concurrency) {
-      const batch = textChunks.slice(i, i + concurrency);
+    for (let i = 0; i < textChunks.length; i += optimalConcurrency) {
+      const batch = textChunks.slice(i, i + optimalConcurrency);
       const audioPromises = batch.map(chunk => getAudioChunk(chunk, ...ttsArgs));
 
       // 等待当前批次并收集结果
@@ -314,10 +338,13 @@ async function getAudioChunk(text, voiceName, rate, pitch, style, outputFormat) 
 
 // Token 缓存信息
 let tokenInfo = { endpoint: null, token: null, expiredAt: null };
+let tokenRefreshing = false; // 新增：刷新标志，防止竞态条件
+let tokenRefreshPromise = null; // 新增：刷新 Promise，用于等待
 const TOKEN_REFRESH_BEFORE_EXPIRY = 5 * 60; // 提前 5 分钟刷新 Token
 
 /**
  * 获取 Microsoft TTS 服务端点和 Token
+ * @description 优化版本，添加竞态保护，避免并发请求重复刷新 Token
  * @returns {Promise<Object>} 端点信息对象
  */
 async function getEndpoint() {
@@ -329,86 +356,79 @@ async function getEndpoint() {
     return tokenInfo.endpoint;
   }
 
-  const endpointUrl = "https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0";
-
-  let clientId;
-  try {
-    clientId = crypto.randomUUID().replace(/-/g, "");
-  } catch (e) {
-    // 如果 crypto.randomUUID 不可用，使用备用方法
-    clientId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  // 竞态保护：如果正在刷新，等待现有刷新完成
+  if (tokenRefreshing && tokenRefreshPromise) {
+    return tokenRefreshPromise;
   }
 
-  try {
-    const signature = await sign(endpointUrl);
+  // 标记刷新中
+  tokenRefreshing = true;
 
-    const response = await fetch(endpointUrl, {
-      method: "POST",
-      headers: {
-        "Accept-Language": "zh-Hans",
-        "X-ClientVersion": "4.0.530a 5fe1dc6c",
-        "X-UserId": "0f04d16a175c411e",
-        "X-HomeGeographicRegion": "zh-Hans-CN",
-        "X-ClientTraceId": clientId,
-        "X-MT-Signature": signature,
-        "User-Agent": "okhttp/4.5.0",
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Length": "0",
-        "Accept-Encoding": "gzip"
-      }
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`获取端点失败: ${response.status} ${response.statusText} - ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    // 解析 JWT Token 获取过期时间
-    let decodedJwt;
+  // 创建刷新 Promise
+  tokenRefreshPromise = (async () => {
     try {
-      const jwt = data.t.split(".")[1];
+      const endpointUrl = "https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0";
 
-      // 尝试多种 base64 解码方式
-      let decoded;
-      if (typeof atob !== 'undefined') {
-        decoded = atob(jwt);
-      } else if (typeof Buffer !== 'undefined') {
-        decoded = Buffer.from(jwt, 'base64').toString('utf-8');
-      } else {
-        // 手动 base64 解码
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-        let result = '';
-        for (let i = 0; i < jwt.length; i += 4) {
-          const a = chars.indexOf(jwt[i]);
-          const b = chars.indexOf(jwt[i + 1]);
-          const c = chars.indexOf(jwt[i + 2]);
-          const d = chars.indexOf(jwt[i + 3]);
-
-          result += String.fromCharCode((a << 2) | (b >> 4));
-          if (c !== 64) result += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-          if (d !== 64) result += String.fromCharCode(((c & 3) << 6) | d);
-        }
-        decoded = result;
+      let clientId;
+      try {
+        clientId = crypto.randomUUID().replace(/-/g, "");
+      } catch (e) {
+        // 如果 crypto.randomUUID 不可用，使用备用方法
+        clientId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       }
 
-      decodedJwt = JSON.parse(decoded);
-    } catch (e) {
-      throw new Error(`JWT 解析失败: ${e.message}`);
+      const signature = await sign(endpointUrl);
+
+      const response = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Accept-Language": "zh-Hans",
+          "X-ClientVersion": "4.0.530a 5fe1dc6c",
+          "X-UserId": "0f04d16a175c411e",
+          "X-HomeGeographicRegion": "zh-Hans-CN",
+          "X-ClientTraceId": clientId,
+          "X-MT-Signature": signature,
+          "User-Agent": "okhttp/4.5.0",
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Length": "0",
+          "Accept-Encoding": "gzip"
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`获取端点失败: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      // 解析 JWT Token 获取过期时间（优化：仅使用 atob）
+      let decodedJwt;
+      try {
+        const jwt = data.t.split(".")[1];
+        const decoded = atob(jwt);
+        decodedJwt = JSON.parse(decoded);
+      } catch (e) {
+        throw new Error(`JWT 解析失败: ${e.message}`);
+      }
+
+      // 更新 Token 缓存
+      tokenInfo = {
+        endpoint: data,
+        token: data.t,
+        expiredAt: decodedJwt.exp
+      };
+
+      return tokenInfo.endpoint;
+    } catch (error) {
+      throw new Error(`端点获取失败: ${error.message}`);
+    } finally {
+      tokenRefreshing = false;
+      tokenRefreshPromise = null;
     }
+  })();
 
-    // 更新 Token 缓存
-    tokenInfo = {
-      endpoint: data,
-      token: data.t,
-      expiredAt: decodedJwt.exp
-    };
-
-    return data;
-  } catch (error) {
-    throw new Error(`端点获取失败: ${error.message}`);
-  }
+  return tokenRefreshPromise;
 }
 
 /**
@@ -434,9 +454,9 @@ async function sign(urlStr) {
   const bytesToSign = `MSTranslatorAndroidApp${encodedUrl}${formattedDate}${uuidStr}`.toLowerCase();
 
   // 解码密钥并生成 HMAC 签名
-  const decode = await base64ToBytes("oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==");
+  const decode = await base64ToBytesLocal("oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==");
   const signData = await hmacSha256(decode, bytesToSign);
-  const signBase64 = await bytesToBase64(signData);
+  const signBase64 = await bytesToBase64Local(signData);
 
   return `MSTranslatorAndroidApp::${signBase64}::${formattedDate}::${uuidStr}`;
 }
@@ -481,88 +501,26 @@ async function hmacSha256(key, data) {
 }
 
 /**
- * Base64 字符串转字节数组
+ * Base64 字符串转字节数组（简化版 - 仅使用 atob）
  * @param {string} base64 - Base64 字符串
  * @returns {Promise<Uint8Array>} 字节数组
  */
-async function base64ToBytes(base64) {
-  try {
-    // 检查全局 atob 函数
-    if (typeof atob !== 'undefined') {
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      return bytes;
-    }
-
-    // 如果 atob 不可用，尝试使用 Buffer (Node.js 环境)
-    if (typeof Buffer !== 'undefined') {
-      return new Uint8Array(Buffer.from(base64, 'base64'));
-    }
-
-    // 手动实现 base64 解码作为最后的备用方案
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let result = '';
-    for (let i = 0; i < base64.length; i += 4) {
-      const a = chars.indexOf(base64[i]);
-      const b = chars.indexOf(base64[i + 1]);
-      const c = chars.indexOf(base64[i + 2]);
-      const d = chars.indexOf(base64[i + 3]);
-
-      result += String.fromCharCode((a << 2) | (b >> 4));
-      if (c !== 64) result += String.fromCharCode(((b & 15) << 4) | (c >> 2));
-      if (d !== 64) result += String.fromCharCode(((c & 3) << 6) | d);
-    }
-
-    const bytes = new Uint8Array(result.length);
-    for (let i = 0; i < result.length; i++) {
-      bytes[i] = result.charCodeAt(i);
-    }
-    return bytes;
-  } catch (e) {
-    throw new Error(`Base64 解码失败: ${e.message}`);
+async function base64ToBytesLocal(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
+  return bytes;
 }
 
 /**
- * 字节数组转 Base64 字符串
+ * 字节数组转 Base64 字符串（简化版 - 仅使用 btoa）
  * @param {Uint8Array} bytes - 字节数组
  * @returns {Promise<string>} Base64 字符串
  */
-async function bytesToBase64(bytes) {
-  try {
-    // 检查全局 btoa 函数
-    if (typeof btoa !== 'undefined') {
-      return btoa(String.fromCharCode.apply(null, bytes));
-    }
-
-    // 如果 btoa 不可用，尝试使用 Buffer (Node.js 环境)
-    if (typeof Buffer !== 'undefined') {
-      return Buffer.from(bytes).toString('base64');
-    }
-
-    // 手动实现 base64 编码作为最后的备用方案
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let result = '';
-    let i = 0;
-
-    while (i < bytes.length) {
-      const a = bytes[i++];
-      const b = i < bytes.length ? bytes[i++] : 0;
-      const c = i < bytes.length ? bytes[i++] : 0;
-
-      result += chars[a >> 2];
-      result += chars[((a & 3) << 4) | (b >> 4)];
-      result += i - 2 < bytes.length ? chars[((b & 15) << 2) | (c >> 6)] : '=';
-      result += i - 1 < bytes.length ? chars[c & 63] : '=';
-    }
-
-    return result;
-  } catch (e) {
-    throw new Error(`Base64 编码失败: ${e.message}`);
-  }
+async function bytesToBase64Local(bytes) {
+  return btoa(String.fromCharCode.apply(null, bytes));
 }
 
 // =================================================================================
@@ -607,148 +565,4 @@ function getSsml(text, voiceName, rate, pitch, style) {
       </mstts:express-as>
     </voice>
   </speak>`;
-}
-
-/**
- * 智能文本分块 - 按句子边界分割文本
- * @param {string} text - 输入文本
- * @param {number} maxChunkLength - 最大分块长度
- * @returns {string[]} 文本块数组
- */
-function smartChunkText(text, maxChunkLength) {
-  if (!text) return [];
-
-  const chunks = [];
-  let currentChunk = "";
-
-  // 按句子分隔符分割（支持中英文标点）
-  const sentences = text.split(/([.?!,;:\n。？！，；：\r]+)/g);
-
-  for (const part of sentences) {
-    // 如果当前块加上新部分不超过限制，则添加
-    if (currentChunk.length + part.length <= maxChunkLength) {
-      currentChunk += part;
-    } else {
-      // 保存当前块并开始新块
-      if (currentChunk.trim()) {
-        chunks.push(currentChunk.trim());
-      }
-      currentChunk = part;
-    }
-  }
-
-  // 添加最后一个块
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  // 如果没有分块成功且文本不为空，强制按长度分割
-  if (chunks.length === 0 && text.length > 0) {
-    for (let i = 0; i < text.length; i += maxChunkLength) {
-      chunks.push(text.substring(i, i + maxChunkLength));
-    }
-  }
-
-  return chunks.filter(chunk => chunk.length > 0);
-}
-
-/**
- * 多阶段文本清理函数
- * @param {string} text - 输入文本
- * @param {Object} options - 清理选项
- * @returns {string} 清理后的文本
- */
-function cleanText(text, options) {
-  let cleanedText = text;
-
-  // 阶段 1: 结构化内容移除
-  if (options.remove_urls) {
-    cleanedText = cleanedText.replace(/(https?:\/\/[^\s]+)/g, '');
-  }
-
-  if (options.remove_markdown) {
-    // 移除图片链接
-    cleanedText = cleanedText.replace(/!\[.*?\]\(.*?\)/g, '');
-    // 移除普通链接，保留链接文本
-    cleanedText = cleanedText.replace(/\[(.*?)\]\(.*?\)/g, '$1');
-    // 移除粗体和斜体
-    cleanedText = cleanedText.replace(/(\*\*|__)(.*?)\1/g, '$2');
-    cleanedText = cleanedText.replace(/(\*|_)(.*?)\1/g, '$2');
-    // 移除代码块
-    cleanedText = cleanedText.replace(/`{1,3}(.*?)`{1,3}/g, '$1');
-    // 移除标题标记
-    cleanedText = cleanedText.replace(/#{1,6}\s/g, '');
-  }
-
-  // 阶段 2: 自定义内容移除
-  if (options.custom_keywords) {
-    const keywords = options.custom_keywords
-      .split(',')
-      .map(k => k.trim())
-      .filter(k => k);
-
-    if (keywords.length > 0) {
-      // 转义正则表达式特殊字符
-      const escapedKeywords = keywords.map(k =>
-        k.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
-      );
-      const regex = new RegExp(escapedKeywords.join('|'), 'g');
-      cleanedText = cleanedText.replace(regex, '');
-    }
-  }
-
-  // 阶段 3: 字符移除
-  if (options.remove_emoji) {
-    // 移除 Emoji 表情符号
-    cleanedText = cleanedText.replace(/\p{Emoji_Presentation}/gu, '');
-  }
-
-  // 阶段 4: 上下文感知格式清理
-  if (options.remove_citation_numbers) {
-    // 移除引用数字（如文末的 [1], [2] 等）
-    cleanedText = cleanedText.replace(/\s\d{1,2}(?=[.。，,;；:：]|$)/g, '');
-  }
-
-  // 阶段 5: 通用格式清理
-  if (options.remove_line_breaks) {
-    // 移除所有多余的空白字符
-    cleanedText = cleanedText.replace(/\s+/g, ' ');
-  }
-
-  // 阶段 6: 最终清理
-  return cleanedText.trim();
-}
-
-/**
- * 生成错误响应
- * @param {string} message - 错误消息
- * @param {number} status - HTTP 状态码
- * @param {string} code - 错误代码
- * @param {string} type - 错误类型
- * @returns {Response} 错误响应对象
- */
-function errorResponse(message, status, code, type = "api_error") {
-  return new Response(
-    JSON.stringify({
-      error: { message, type, param: null, code }
-    }),
-    {
-      status,
-      headers: { "Content-Type": "application/json", ...makeCORSHeaders() }
-    }
-  );
-}
-
-/**
- * 生成 CORS 响应头
- * @param {string} extraHeaders - 额外的允许头部
- * @returns {Object} CORS 头部对象
- */
-function makeCORSHeaders(extraHeaders = "Content-Type, Authorization") {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": extraHeaders,
-    "Access-Control-Max-Age": "86400"
-  };
 }

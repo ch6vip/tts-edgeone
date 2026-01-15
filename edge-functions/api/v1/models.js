@@ -1,7 +1,12 @@
 /**
  * EdgeOne Pages Edge Function for /api/v1/models
- * 处理模型列表请求
+ * @version 2.0.0 (优化版)
+ * @description 处理模型列表请求，使用公共工具库
  */
+
+// 导入公共工具
+import { makeCORSHeaders, handleOptions as corsHandleOptions } from '../../utils/cors.js';
+import { errorResponse } from '../../utils/errors.js';
 
 // OpenAI 音色映射
 const OPENAI_VOICE_MAP = {
@@ -14,46 +19,6 @@ const OPENAI_VOICE_MAP = {
 };
 
 /**
- * 生成 CORS 头
- * @returns {Object} CORS 头对象
- */
-function makeCORSHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Max-Age": "86400"
-  };
-}
-
-/**
- * 处理 CORS 预检请求
- * @returns {Response} CORS 响应
- */
-function handleOptions() {
-  return new Response(null, {
-    status: 200,
-    headers: makeCORSHeaders()
-  });
-}
-
-/**
- * 生成错误响应
- * @param {string} message - 错误消息
- * @param {number} status - HTTP 状态码
- * @param {string} type - 错误类型
- * @returns {Response} 错误响应
- */
-function errorResponse(message, status = 400, type = "invalid_request_error") {
-  return new Response(JSON.stringify({
-    error: { message, type, code: null }
-  }), {
-    status,
-    headers: { "Content-Type": "application/json", ...makeCORSHeaders() }
-  });
-}
-
-/**
  * 处理 /api/v1/models 请求
  * @param {Object} context - EdgeOne Pages 上下文对象
  * @returns {Promise<Response>} HTTP 响应
@@ -62,7 +27,9 @@ export default async function onRequest(context) {
   const request = context.request;
 
   // 处理 CORS 预检请求
-  if (request.method === "OPTIONS") return handleOptions(request);
+  if (request.method === "OPTIONS") {
+    return corsHandleOptions(request.headers.get("Access-Control-Request-Headers"));
+  }
 
   // API 密钥验证
   const API_KEY = context.env.API_KEY;
