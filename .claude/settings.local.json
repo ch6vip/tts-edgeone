@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir /B)"
+      "Bash(dir /B)",
+      "Bash(ls:*)",
+      "Bash(if [ ! -d \"edge-functions/utils\" ])",
+      "Bash(then echo \"✅ utils 目录已成功删除\")",
+      "Bash(else echo \"❌ utils 目录仍然存在\")",
+      "Bash(fi)"
     ]
   }
 }
