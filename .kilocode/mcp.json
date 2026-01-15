@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "augment-context-engine": {
+      "command": "auggie",
+      "args": ["--mcp"],
+      "env": {
+        "AUGMENT_API_TOKEN": "ace_c6c8719ebbd7cc4de9ed7eaec0760ae893967542",
+        "AUGMENT_API_URL": "https://acemcp.heroman.wtf/relay/"
+      }
+    }
+  }
+}
