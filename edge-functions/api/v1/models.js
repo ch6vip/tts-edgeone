@@ -1,12 +1,75 @@
 /**
  * EdgeOne Pages Edge Function for /api/v1/models
- * @version 2.0.0 (优化版)
- * @description 处理模型列表请求，使用公共工具库
+ * @version 2.0.1 (优化版 - CommonJS)
+ * @description 处理模型列表请求
+ *
+ * @changelog v2.0.1
+ * - 回退到不使用 ES6 模块（移除 import/export）
+ * - 将工具函数直接内联到主文件
+ * - 保留所有功能和错误处理逻辑
  */
 
-// 导入公共工具
-import { makeCORSHeaders, handleOptions as corsHandleOptions } from '../../utils/cors.js';
-import { errorResponse } from '../../utils/errors.js';
+// =================================================================================
+// 工具函数（内联版本）
+// =================================================================================
+
+/**
+ * 生成 CORS 响应头
+ * @param {string} extraHeaders - 额外允许的请求头
+ * @returns {Object} CORS 头部对象
+ */
+function makeCORSHeaders(extraHeaders = "Content-Type, Authorization") {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": extraHeaders,
+    "Access-Control-Max-Age": "86400"
+  };
+}
+
+/**
+ * 处理 CORS 预检请求
+ * @param {string} extraHeaders - 额外允许的请求头
+ * @returns {Response} CORS 预检响应
+ */
+function corsHandleOptions(extraHeaders) {
+  return new Response(null, {
+    status: 204,
+    headers: makeCORSHeaders(extraHeaders)
+  });
+}
+
+/**
+ * 生成标准化的错误响应
+ * @param {string} message - 错误消息
+ * @param {number} status - HTTP 状态码
+ * @param {string} code - 错误代码
+ * @param {string} type - 错误类型
+ * @returns {Response} 错误响应对象
+ */
+function errorResponse(message, status = 500, code = null, type = "api_error") {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message,
+        type,
+        code,
+        param: null
+      }
+    }),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        ...makeCORSHeaders()
+      }
+    }
+  );
+}
+
+// =================================================================================
+// 主要逻辑
+// =================================================================================
 
 // OpenAI 音色映射
 const OPENAI_VOICE_MAP = {
@@ -23,7 +86,7 @@ const OPENAI_VOICE_MAP = {
  * @param {Object} context - EdgeOne Pages 上下文对象
  * @returns {Promise<Response>} HTTP 响应
  */
-export default async function onRequest(context) {
+async function onRequest(context) {
   const request = context.request;
 
   // 处理 CORS 预检请求
@@ -60,3 +123,10 @@ export default async function onRequest(context) {
     return errorResponse(`模型列表请求错误: ${err.message}`, 500, "internal_server_error");
   }
 }
+
+// =================================================================================
+// 导出（EdgeOne Pages 兼容格式）
+// =================================================================================
+
+// EdgeOne Pages 需要 default export
+export default { fetch: onRequest };

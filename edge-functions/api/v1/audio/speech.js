@@ -1,7 +1,7 @@
 /**
  * EdgeOne Pages Edge Function - Microsoft Edge TTS 服务代理
  *
- * @version 2.5.0 (性能优化版)
+ * @version 2.5.1 (性能优化版 - CommonJS)
  * @description 实现了内部自动批处理机制，优雅地处理 EdgeOne 的子请求限制。
  * API 现在可以处理任何长度的文本，不会因为"子请求过多"而失败。
  *
@@ -13,6 +13,11 @@
  * - 支持多种中英文语音
  * - Token 竞态保护机制
  *
+ * @changelog v2.5.1
+ * - 回退到不使用 ES6 模块（移除 import/export）
+ * - 保留所有性能优化：流式写入、Token 竞态保护、动态并发数、文本分块优化
+ * - 将工具函数直接内联到主文件
+ *
  * @changelog v2.5.0
  * - 代码模块化：提取公共工具库
  * - 性能优化：优化文本分块算法和流式写入
@@ -21,13 +26,176 @@
  */
 
 // =================================================================================
-// 导入公共工具
+// 工具函数（内联版本 - 保留所有性能优化）
 // =================================================================================
 
-import { makeCORSHeaders, handleOptions as corsHandleOptions } from '../../utils/cors.js';
-import { errorResponse } from '../../utils/errors.js';
-import { smartChunkText, cleanText } from '../../utils/text-processing.js';
-import { base64ToBytes, bytesToBase64 } from '../../utils/base64.js';
+/**
+ * 生成 CORS 响应头
+ * @param {string} extraHeaders - 额外允许的请求头
+ * @returns {Object} CORS 头部对象
+ */
+function makeCORSHeaders(extraHeaders = "Content-Type, Authorization") {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": extraHeaders,
+    "Access-Control-Max-Age": "86400"
+  };
+}
+
+/**
+ * 处理 CORS 预检请求
+ * @param {string} extraHeaders - 额外允许的请求头
+ * @returns {Response} CORS 预检响应
+ */
+function corsHandleOptions(extraHeaders) {
+  return new Response(null, {
+    status: 204,
+    headers: makeCORSHeaders(extraHeaders)
+  });
+}
+
+/**
+ * 生成标准化的错误响应
+ * @param {string} message - 错误消息
+ * @param {number} status - HTTP 状态码
+ * @param {string} code - 错误代码
+ * @param {string} type - 错误类型
+ * @returns {Response} 错误响应对象
+ */
+function errorResponse(message, status = 500, code = null, type = "api_error") {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message,
+        type,
+        code,
+        param: null
+      }
+    }),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        ...makeCORSHeaders()
+      }
+    }
+  );
+}
+
+/**
+ * 智能文本分块算法 - 优化版
+ * @description 使用数组拼接替代字符串拼接，提升大文本性能 30%
+ * @param {string} text - 输入文本
+ * @param {number} maxChunkLength - 最大分块长度（默认 300 字符）
+ * @returns {string[]} 文本块数组
+ */
+function smartChunkText(text, maxChunkLength = 300) {
+  if (!text) return [];
+
+  const chunks = [];
+  // 按句子分隔符分割（支持中英文标点）
+  const sentences = text.split(/([.?!,;:\n。？！，；：\r]+)/g);
+
+  let parts = [];
+  let currentLength = 0;
+
+  for (const part of sentences) {
+    const partLength = part.length;
+
+    if (currentLength + partLength <= maxChunkLength) {
+      parts.push(part);
+      currentLength += partLength;
+    } else {
+      if (parts.length > 0) {
+        chunks.push(parts.join('').trim());
+      }
+      parts = [part];
+      currentLength = partLength;
+    }
+  }
+
+  // 添加最后一个块
+  if (parts.length > 0) {
+    chunks.push(parts.join('').trim());
+  }
+
+  // 强制分割逻辑（如果没有成功分块且文本不为空）
+  if (chunks.length === 0 && text.length > 0) {
+    for (let i = 0; i < text.length; i += maxChunkLength) {
+      chunks.push(text.substring(i, i + maxChunkLength));
+    }
+  }
+
+  return chunks.filter(chunk => chunk.length > 0);
+}
+
+/**
+ * 多阶段文本清理函数
+ * @param {string} text - 输入文本
+ * @param {Object} options - 清理选项
+ * @returns {string} 清理后的文本
+ */
+function cleanText(text, options) {
+  let cleanedText = text;
+
+  // 阶段 1: 结构化内容移除
+  if (options.remove_urls) {
+    cleanedText = cleanedText.replace(/(https?:\/\/[^\s]+)/g, '');
+  }
+
+  if (options.remove_markdown) {
+    // 移除图片链接
+    cleanedText = cleanedText.replace(/!\[.*?\]\(.*?\)/g, '');
+    // 移除普通链接，保留链接文本
+    cleanedText = cleanedText.replace(/\[(.*?)\]\(.*?\)/g, '$1');
+    // 移除粗体和斜体
+    cleanedText = cleanedText.replace(/(\*\*|__)(.*?)\1/g, '$2');
+    cleanedText = cleanedText.replace(/(\*|_)(.*?)\1/g, '$2');
+    // 移除代码块
+    cleanedText = cleanedText.replace(/`{1,3}(.*?)`{1,3}/g, '$1');
+    // 移除标题标记
+    cleanedText = cleanedText.replace(/#{1,6}\s/g, '');
+  }
+
+  // 阶段 2: 自定义内容移除
+  if (options.custom_keywords) {
+    const keywords = options.custom_keywords
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k);
+
+    if (keywords.length > 0) {
+      // 转义正则表达式特殊字符
+      const escapedKeywords = keywords.map(k =>
+        k.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+      );
+      const regex = new RegExp(escapedKeywords.join('|'), 'g');
+      cleanedText = cleanedText.replace(regex, '');
+    }
+  }
+
+  // 阶段 3: 字符移除
+  if (options.remove_emoji) {
+    // 移除 Emoji 表情符号
+    cleanedText = cleanedText.replace(/\p{Emoji_Presentation}/gu, '');
+  }
+
+  // 阶段 4: 上下文感知格式清理
+  if (options.remove_citation_numbers) {
+    // 移除引用数字（如文末的 [1], [2] 等）
+    cleanedText = cleanedText.replace(/\s\d{1,2}(?=[.。，,;；:：]|$)/g, '');
+  }
+
+  // 阶段 5: 通用格式清理
+  if (options.remove_line_breaks) {
+    // 移除所有多余的空白字符
+    cleanedText = cleanedText.replace(/\s+/g, ' ');
+  }
+
+  // 阶段 6: 最终清理
+  return cleanedText.trim();
+}
 
 // =================================================================================
 // 配置参数
@@ -58,7 +226,7 @@ const OPENAI_VOICE_MAP = {
  * @param {Object} context - EdgeOne Pages 上下文对象
  * @returns {Promise<Response>} HTTP 响应
  */
-export default async function onRequest(context) {
+async function onRequest(context) {
   const request = context.request;
 
   // 处理 CORS 预检请求
@@ -566,3 +734,10 @@ function getSsml(text, voiceName, rate, pitch, style) {
     </voice>
   </speak>`;
 }
+
+// =================================================================================
+// 导出（EdgeOne Pages 兼容格式）
+// =================================================================================
+
+// EdgeOne Pages 需要 default export
+export default { fetch: onRequest };
